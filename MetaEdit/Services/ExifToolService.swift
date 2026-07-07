@@ -34,6 +34,29 @@ nonisolated final class ExifToolService: Sendable {
     /// Returns captured stdout; throws `MetaEditError.exifToolFailed` on a
     /// nonzero exit.
     func runExifTool(arguments: [String]) async throws -> String {
+        let result = try await runExifToolProcess(arguments: arguments)
+        guard result.exitCode == 0 else {
+            throw MetaEditError.exifToolFailed(exitCode: result.exitCode,
+                                               stderr: result.stderr.isEmpty ? result.stdout : result.stderr)
+        }
+        return result.stdout
+    }
+
+    /// Like `runExifTool` but tolerates exit code 1 when stdout was produced
+    /// — ExifTool's "minor errors" code, e.g. one unreadable file in a batch
+    /// read that still returned results for the rest.
+    private func runExifToolLenient(arguments: [String]) async throws -> String {
+        let result = try await runExifToolProcess(arguments: arguments)
+        guard result.exitCode == 0 || (result.exitCode == 1 && !result.stdout.isEmpty) else {
+            throw MetaEditError.exifToolFailed(exitCode: result.exitCode,
+                                               stderr: result.stderr.isEmpty ? result.stdout : result.stderr)
+        }
+        return result.stdout
+    }
+
+    private func runExifToolProcess(
+        arguments: [String]
+    ) async throws -> (stdout: String, stderr: String, exitCode: Int32) {
         let exifToolURL = try Self.bundledExifToolURL()
 
         return try await Task.detached(priority: .userInitiated) {
@@ -69,12 +92,7 @@ nonisolated final class ExifToolService: Sendable {
 
             let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
             let stderr = String(data: stderrData, encoding: .utf8) ?? ""
-
-            guard process.terminationStatus == 0 else {
-                throw MetaEditError.exifToolFailed(exitCode: process.terminationStatus,
-                                                   stderr: stderr.isEmpty ? stdout : stderr)
-            }
-            return stdout
+            return (stdout, stderr, process.terminationStatus)
         }.value
     }
 
@@ -122,6 +140,51 @@ nonisolated final class ExifToolService: Sendable {
             }
         }
         return record
+    }
+
+    /// Reads many files in as few ExifTool invocations as possible (one JSON
+    /// call per chunk instead of one process per file). RAW sidecars are
+    /// read in the same call and merged. Unreadable files are skipped.
+    func readMetadataBatch(fileURLs: [URL]) async throws -> [URL: MetadataRecord] {
+        guard !fileURLs.isEmpty else { return [:] }
+
+        // Include existing sidecars of RAW files in the same invocation.
+        var sidecarByOwner: [URL: URL] = [:]
+        for url in fileURLs where LibraryScanner.fileKind(for: url) == .raw {
+            let sidecar = sidecarURL(for: url)
+            if FileManager.default.fileExists(atPath: sidecar.path) {
+                sidecarByOwner[url] = sidecar
+            }
+        }
+
+        var tagsByPath: [String: [String: Any]] = [:]
+        let allPaths = fileURLs.map(\.path) + sidecarByOwner.values.map(\.path)
+        for chunk in allPaths.chunked(into: 100) {
+            try Task.checkCancellation()
+            let output = try await runExifToolLenient(arguments: ["-json", "-G0", "-struct"] + chunk)
+            guard
+                let data = output.data(using: .utf8),
+                let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+            else {
+                throw MetaEditError.malformedMetadata("ExifTool returned unparseable JSON for a batch read")
+            }
+            for tags in array {
+                if let source = tags["SourceFile"] as? String {
+                    tagsByPath[source] = tags
+                }
+            }
+        }
+
+        var records: [URL: MetadataRecord] = [:]
+        for url in fileURLs {
+            guard let tags = tagsByPath[url.path] else { continue }
+            var record = Self.record(fromTags: tags)
+            if let sidecar = sidecarByOwner[url], let sidecarTags = tagsByPath[sidecar.path] {
+                record.fields = Self.record(fromTags: sidecarTags).fields
+            }
+            records[url] = record
+        }
+        return records
     }
 
     private func readSingleFile(_ fileURL: URL) async throws -> MetadataRecord {
@@ -174,35 +237,154 @@ nonisolated final class ExifToolService: Sendable {
     func verifyWrite(fileURL: URL, expected: MetadataFields, mode: WriteMode) async throws -> Bool {
         let target = mode == .sidecar ? sidecarURL(for: fileURL) : fileURL
         let actual = try await readSingleFile(target).fields
+        return Self.fieldsMatch(expected: expected, actual: actual, policy: FieldWritePolicy())
+    }
 
+    private static func fieldsMatch(expected: MetadataFields, actual: MetadataFields, policy: FieldWritePolicy) -> Bool {
         func norm(_ s: String?) -> String? {
             guard let t = s?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
             return t
         }
-        func matches(_ keyPath: KeyPath<MetadataFields, String?>) -> Bool {
-            guard let expectedValue = expected[keyPath: keyPath] else { return true }
-            return norm(expectedValue) == norm(actual[keyPath: keyPath])
+        for (field, keyPath) in MetadataFields.scalarFieldKeyPaths {
+            guard let expectedValue = expected[keyPath: keyPath], policy.policy(for: field) != .skip else { continue }
+            if norm(expectedValue) != norm(actual[keyPath: keyPath]) { return false }
         }
-        let scalarFieldsMatch = matches(\.headline) && matches(\.caption)
-            && matches(\.byline) && matches(\.credit) && matches(\.source)
-            && matches(\.copyrightNotice) && matches(\.copyrightStatus)
-            && matches(\.city) && matches(\.state) && matches(\.country)
-            && matches(\.location) && matches(\.category)
-            && matches(\.specialInstructions) && matches(\.dateCreated)
-
-        if let expectedKeywords = expected.keywords {
-            return scalarFieldsMatch && expectedKeywords == (actual.keywords ?? [])
+        if let expectedKeywords = expected.keywords, policy.policy(for: .keywords) != .skip {
+            let actualKeywords = actual.keywords ?? []
+            if policy.policy(for: .keywords) == .append {
+                // Appended items must be present; the rest of the list is
+                // per-file and expected to differ.
+                if !expectedKeywords.allSatisfy(actualKeywords.contains) { return false }
+            } else if expectedKeywords != actualKeywords {
+                return false
+            }
         }
-        return scalarFieldsMatch
+        return true
     }
 
-    /// Builds `-TAG=value` assignment arguments, IPTC IIM + XMP in sync.
-    /// List tags (keywords) are cleared then re-added item by item.
-    private func assignmentArguments(for fields: MetadataFields, includeIPTC: Bool) -> [String] {
+    /// Writes the same change set to many files, honoring the per-field
+    /// policy, then verifies every file by re-reading. Files sharing the
+    /// same argument shape are written in chunked single invocations; on a
+    /// chunk failure each file is retried individually so failures are
+    /// attributed to specific files.
+    func writeMetadataBatch(
+        fileURLs: [URL],
+        fields: MetadataFields,
+        policy: FieldWritePolicy,
+        modeFor: @Sendable (URL) -> WriteMode
+    ) async throws -> BatchWriteResult {
+        var result = BatchWriteResult()
+        guard !fields.isEmpty, !fileURLs.isEmpty else { return result }
+
+        var embeddedWithIPTC: [URL] = []
+        var embeddedXMPOnly: [URL] = []
+        var sidecarFiles: [URL] = []
+        for url in fileURLs {
+            switch modeFor(url) {
+            case .sidecar:
+                sidecarFiles.append(url)
+            case .embedded:
+                if LibraryScanner.fileKind(for: url) == .raw {
+                    embeddedXMPOnly.append(url)
+                } else {
+                    embeddedWithIPTC.append(url)
+                }
+            }
+        }
+
+        func writeEmbeddedGroup(_ urls: [URL], includeIPTC: Bool) async {
+            let args = assignmentArguments(for: fields, includeIPTC: includeIPTC, policy: policy)
+            guard !args.isEmpty else { return }
+
+            var writable: [URL] = []
+            for url in urls {
+                do {
+                    try preflightWrite(target: url)
+                    writable.append(url)
+                } catch {
+                    result.failures.append((url, error.localizedDescription))
+                }
+            }
+            for chunk in writable.chunked(into: 50) {
+                if Task.isCancelled { return }
+                do {
+                    try await runExifTool(arguments: ["-overwrite_original"] + args + chunk.map(\.path))
+                    result.written.append(contentsOf: chunk)
+                } catch {
+                    // Retry one by one so the failing file(s) are identified.
+                    for url in chunk {
+                        if Task.isCancelled { return }
+                        do {
+                            try await runWrite(["-overwrite_original"] + args + [url.path], target: url)
+                            result.written.append(url)
+                        } catch {
+                            result.failures.append((url, error.localizedDescription))
+                        }
+                    }
+                }
+            }
+        }
+
+        await writeEmbeddedGroup(embeddedWithIPTC, includeIPTC: true)
+        await writeEmbeddedGroup(embeddedXMPOnly, includeIPTC: false)
+
+        for url in sidecarFiles {
+            if Task.isCancelled { break }
+            do {
+                try await writeMetadata(fileURL: url, fields: fields, mode: .sidecar)
+                result.written.append(url)
+            } catch {
+                result.failures.append((url, error.localizedDescription))
+            }
+        }
+
+        // Verify everything that claims to have been written.
+        if !result.written.isEmpty {
+            let records = try await readMetadataBatch(fileURLs: result.written)
+            var verified: [URL] = []
+            for url in result.written {
+                if let record = records[url],
+                   Self.fieldsMatch(expected: fields, actual: record.fields, policy: policy) {
+                    verified.append(url)
+                } else {
+                    result.failures.append((url, MetaEditError.writeVerificationFailed(path: url.lastPathComponent).localizedDescription))
+                }
+            }
+            result.written = verified
+        }
+        return result
+    }
+
+    /// The IPTC IIM / XMP tag pair for each scalar field.
+    /// Immutable, so safe to share despite key paths lacking Sendable.
+    nonisolated(unsafe) private static let scalarTagPairs: [(MetadataFields.Field, WritableKeyPath<MetadataFields, String?>, iptc: String?, xmp: String)] = [
+        (.headline, \.headline, "Headline", "photoshop:Headline"),
+        (.caption, \.caption, "Caption-Abstract", "dc:Description"),
+        (.byline, \.byline, "By-line", "dc:Creator"),
+        (.credit, \.credit, "Credit", "photoshop:Credit"),
+        (.source, \.source, "Source", "photoshop:Source"),
+        (.copyrightNotice, \.copyrightNotice, "CopyrightNotice", "dc:Rights"),
+        (.copyrightStatus, \.copyrightStatus, nil, "xmpRights:Marked"),
+        (.city, \.city, "City", "photoshop:City"),
+        (.state, \.state, "Province-State", "photoshop:State"),
+        (.country, \.country, "Country-PrimaryLocationName", "photoshop:Country"),
+        (.location, \.location, "Sub-location", "iptcCore:Location"),
+        (.category, \.category, "Category", "photoshop:Category"),
+        (.specialInstructions, \.specialInstructions, "SpecialInstructions", "photoshop:Instructions"),
+        (.dateCreated, \.dateCreated, "DateCreated", "photoshop:DateCreated"),
+    ]
+
+    /// Builds `-TAG=value` assignment arguments, IPTC IIM + XMP in sync,
+    /// honoring the per-field policy (skip / overwrite / append).
+    private func assignmentArguments(
+        for fields: MetadataFields,
+        includeIPTC: Bool,
+        policy: FieldWritePolicy = FieldWritePolicy()
+    ) -> [String] {
         var args: [String] = []
 
-        func assign(_ value: String?, iptc: String?, xmp: String) {
-            guard let value else { return }
+        for (field, keyPath, iptc, xmp) in Self.scalarTagPairs {
+            guard let value = fields[keyPath: keyPath], policy.policy(for: field) != .skip else { continue }
             let sanitized = sanitizeArgument(value)
             if includeIPTC, let iptc {
                 args.append("-IPTC:\(iptc)=\(sanitized)")
@@ -210,31 +392,30 @@ nonisolated final class ExifToolService: Sendable {
             args.append("-XMP-\(xmp)=\(sanitized)")
         }
 
-        assign(fields.headline, iptc: "Headline", xmp: "photoshop:Headline")
-        assign(fields.caption, iptc: "Caption-Abstract", xmp: "dc:Description")
-        assign(fields.byline, iptc: "By-line", xmp: "dc:Creator")
-        assign(fields.credit, iptc: "Credit", xmp: "photoshop:Credit")
-        assign(fields.source, iptc: "Source", xmp: "photoshop:Source")
-        assign(fields.copyrightNotice, iptc: "CopyrightNotice", xmp: "dc:Rights")
-        assign(fields.copyrightStatus, iptc: nil, xmp: "xmpRights:Marked")
-        assign(fields.city, iptc: "City", xmp: "photoshop:City")
-        assign(fields.state, iptc: "Province-State", xmp: "photoshop:State")
-        assign(fields.country, iptc: "Country-PrimaryLocationName", xmp: "photoshop:Country")
-        assign(fields.location, iptc: "Sub-location", xmp: "iptcCore:Location")
-        assign(fields.category, iptc: "Category", xmp: "photoshop:Category")
-        assign(fields.specialInstructions, iptc: "SpecialInstructions", xmp: "photoshop:Instructions")
-        assign(fields.dateCreated, iptc: "DateCreated", xmp: "photoshop:DateCreated")
-
-        if let keywords = fields.keywords {
-            // Replace-list pattern: a bare `=` clears, then repeated `=`
-            // assignments accumulate the new items. (`+=` would add to the
-            // file's existing list and skip the clear.)
-            if includeIPTC { args.append("-IPTC:Keywords=") }
-            args.append("-XMP-dc:Subject=")
-            for keyword in keywords {
-                let sanitized = sanitizeArgument(keyword)
-                if includeIPTC { args.append("-IPTC:Keywords=\(sanitized)") }
-                args.append("-XMP-dc:Subject=\(sanitized)")
+        if let keywords = fields.keywords, policy.policy(for: .keywords) != .skip {
+            if policy.policy(for: .keywords) == .append {
+                // Add to each file's existing list; the -= before += drops
+                // an existing duplicate so items aren't doubled.
+                for keyword in keywords {
+                    let sanitized = sanitizeArgument(keyword)
+                    if includeIPTC {
+                        args.append("-IPTC:Keywords-=\(sanitized)")
+                        args.append("-IPTC:Keywords+=\(sanitized)")
+                    }
+                    args.append("-XMP-dc:Subject-=\(sanitized)")
+                    args.append("-XMP-dc:Subject+=\(sanitized)")
+                }
+            } else {
+                // Replace-list pattern: a bare `=` clears, then repeated `=`
+                // assignments accumulate the new items. (`+=` would add to
+                // the file's existing list and skip the clear.)
+                if includeIPTC { args.append("-IPTC:Keywords=") }
+                args.append("-XMP-dc:Subject=")
+                for keyword in keywords {
+                    let sanitized = sanitizeArgument(keyword)
+                    if includeIPTC { args.append("-IPTC:Keywords=\(sanitized)") }
+                    args.append("-XMP-dc:Subject=\(sanitized)")
+                }
             }
         }
 
@@ -364,6 +545,13 @@ nonisolated final class ExifToolService: Sendable {
         }
     }
 
+    /// Which fields differ across a selection, so the UI can warn before a
+    /// batch overwrite.
+    func diffFields(across selection: [URL]) async throws -> BatchFieldSummary {
+        let records = try await readMetadataBatch(fileURLs: selection)
+        return BatchFieldSummary.summarize(selection.compactMap { records[$0]?.fields })
+    }
+
     private static func stringArray(_ any: Any?) -> [String] {
         switch any {
         case let s as String:
@@ -374,6 +562,14 @@ nonisolated final class ExifToolService: Sendable {
             return a.compactMap { stringValue($0) }
         default:
             return []
+        }
+    }
+}
+
+nonisolated private extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        stride(from: 0, to: count, by: size).map {
+            Array(self[$0..<Swift.min($0 + size, count)])
         }
     }
 }

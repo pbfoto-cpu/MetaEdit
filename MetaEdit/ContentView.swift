@@ -65,7 +65,10 @@ struct FileListPane: View {
                     FileRowView(file: file)
                         .contextMenu {
                             Button("Remove from List") {
-                                appState.remove([file.id])
+                                // Removing a row inside the selection removes
+                                // the whole selection.
+                                appState.remove(appState.selection.contains(file.id)
+                                    ? appState.selection : [file.id])
                             }
                             Button("Show in Finder") {
                                 NSWorkspace.shared.activateFileViewerSelecting([file.url])
@@ -73,16 +76,14 @@ struct FileListPane: View {
                         }
                 }
                 .onDeleteCommand {
-                    if let selection = appState.selection {
-                        appState.remove([selection])
-                    }
+                    appState.remove(appState.selection)
                 }
             }
         }
         .navigationTitle(appState.currentFolder?.lastPathComponent ?? "MetaEdit")
     }
 
-    private var selectionBinding: Binding<ImageFileRef.ID?> {
+    private var selectionBinding: Binding<Set<ImageFileRef.ID>> {
         Binding(
             get: { appState.selection },
             set: { appState.select($0) }
@@ -149,6 +150,12 @@ struct PreviewPane: View {
                 } else {
                     ProgressView()
                 }
+            } else if appState.selection.count > 1 {
+                ContentUnavailableView {
+                    Label("\(appState.selection.count) Images Selected", systemImage: "photo.stack")
+                } description: {
+                    Text("Batch edit their metadata in the panel on the right.")
+                }
             } else {
                 ContentUnavailableView {
                     Label("No Selection", systemImage: "photo")
@@ -189,6 +196,9 @@ struct MetadataPane: View {
             } else if let record = appState.selectedRecord, let file = appState.selectedFile {
                 MetadataEditorView(record: record, file: file)
                     .id(file.url)
+            } else if let summary = appState.batchSummary, appState.selection.count > 1 {
+                BatchEditorView(summary: summary)
+                    .id(appState.selection)
             } else {
                 ContentUnavailableView {
                     Label("No Metadata", systemImage: "list.bullet.rectangle")
@@ -198,6 +208,161 @@ struct MetadataPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Batch editor for a multi-selection. Fields where every file agrees are
+/// prefilled; fields that differ show a "multiple values" hint and are only
+/// written if the user types into them. Keywords can replace or append.
+struct BatchEditorView: View {
+    @Environment(AppState.self) private var appState
+    let summary: BatchFieldSummary
+    @State private var draft: MetadataFields
+    @State private var appendKeywords = true
+
+    init(summary: BatchFieldSummary) {
+        self.summary = summary
+        var initial = summary.common
+        // In append mode the keywords box is for *new* keywords only.
+        initial.keywords = nil
+        _draft = State(initialValue: initial)
+    }
+
+    private var pendingDelta: MetadataFields {
+        var base = summary.common
+        base.keywords = nil
+        var delta = MetadataFields.delta(from: base, to: draft)
+        if !appendKeywords, draft.keywords == nil, summary.conflicting.contains(.keywords) {
+            // Replace mode with an untouched empty box on a conflicting
+            // field means "leave keywords alone", not "clear them".
+            delta.keywords = nil
+        }
+        return delta
+    }
+
+    private var isDirty: Bool { !pendingDelta.isEmpty }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    Label("\(summary.count) images selected", systemImage: "photo.stack")
+                        .font(.callout)
+                    if !summary.conflicting.isEmpty {
+                        Label("Fields marked \u{201C}multiple values\u{201D} differ across the selection and are only overwritten if you type into them.",
+                              systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Section("IPTC") {
+                    batchRow("Headline", \.headline)
+                    batchRow("Caption", \.caption, axis: .vertical)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
+                            Text("Keywords")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Picker("", selection: $appendKeywords) {
+                                Text("Add to existing").tag(true)
+                                Text("Replace all").tag(false)
+                            }
+                            .pickerStyle(.segmented)
+                            .controlSize(.mini)
+                            .fixedSize()
+                            .labelsHidden()
+                        }
+                        TextField("Keywords", text: keywordsBinding,
+                                  prompt: Text(keywordsPrompt))
+                            .labelsHidden()
+                            .multilineTextAlignment(.leading)
+                    }
+                    batchRow("Byline / Creator", \.byline)
+                    batchRow("Credit", \.credit)
+                    batchRow("Source", \.source)
+                    batchRow("Copyright Notice", \.copyrightNotice)
+                    batchRow("City", \.city)
+                    batchRow("State / Province", \.state)
+                    batchRow("Country", \.country)
+                    batchRow("Location", \.location)
+                    batchRow("Category", \.category)
+                    batchRow("Special Instructions", \.specialInstructions, axis: .vertical)
+                    batchRow("Date Created", \.dateCreated)
+                }
+            }
+            .formStyle(.grouped)
+            .disabled(appState.isSaving)
+
+            Divider()
+            applyBar
+        }
+    }
+
+    private var applyBar: some View {
+        HStack {
+            if appState.isSaving {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Applying\u{2026}")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Apply to \(summary.count) Images") {
+                var policy = FieldWritePolicy()
+                policy.perField[.keywords] = appendKeywords ? .append : .overwrite
+                appState.applyBatch(fields: pendingDelta, policy: policy)
+            }
+            .keyboardShortcut("s", modifiers: .command)
+            .buttonStyle(.borderedProminent)
+            .disabled(!isDirty || appState.isSaving)
+        }
+        .padding(10)
+    }
+
+    private var keywordsPrompt: String {
+        if appendKeywords { return "keywords to add, comma separated" }
+        return summary.conflicting.contains(.keywords) ? "multiple values" : "comma, separated"
+    }
+
+    @ViewBuilder
+    private func batchRow(
+        _ label: String,
+        _ keyPath: WritableKeyPath<MetadataFields, String?>,
+        axis: Axis = .horizontal
+    ) -> some View {
+        let field = MetadataFields.scalarFieldKeyPaths.first { $0.1 == keyPath }?.0
+        let conflicting = field.map(summary.conflicting.contains) ?? false
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField(label, text: binding(keyPath),
+                      prompt: conflicting ? Text("multiple values") : nil, axis: axis)
+                .labelsHidden()
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func binding(_ keyPath: WritableKeyPath<MetadataFields, String?>) -> Binding<String> {
+        Binding(
+            get: { draft[keyPath: keyPath] ?? "" },
+            set: { draft[keyPath: keyPath] = $0.isEmpty ? nil : $0 }
+        )
+    }
+
+    private var keywordsBinding: Binding<String> {
+        Binding(
+            get: { (draft.keywords ?? []).joined(separator: ", ") },
+            set: { text in
+                let parsed = text.split(separator: ",")
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+                draft.keywords = parsed.isEmpty ? nil : parsed
+            }
+        )
     }
 }
 

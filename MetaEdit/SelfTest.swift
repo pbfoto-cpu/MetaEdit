@@ -70,6 +70,36 @@ nonisolated enum SelfTest {
             }
             print("SELFTEST WRITE \(mode) OK")
         }
+
+        // 3. Batch write across copies: scalar overwrite + keyword append
+        let batchCopies: [URL] = try (1...3).map { index in
+            let copy = tempDir.appendingPathComponent("batch-\(index).\(fileURL.pathExtension)")
+            try FileManager.default.copyItem(at: fileURL, to: copy)
+            return copy
+        }
+        var batchFields = MetadataFields()
+        batchFields.credit = "Batch Credit"
+        batchFields.keywords = ["batch-added"]
+        var policy = FieldWritePolicy()
+        policy.perField[.keywords] = .append
+
+        let result = try await service.writeMetadataBatch(
+            fileURLs: batchCopies, fields: batchFields, policy: policy,
+            modeFor: { _ in .embedded }
+        )
+        guard result.failures.isEmpty, result.written.count == batchCopies.count else {
+            fail("SELFTEST FAIL: batch write \(result.written.count)/\(batchCopies.count) verified, failures: \(result.failures.map(\.message))")
+        }
+        // Appended keywords must coexist with the originals.
+        let readBack = try await service.readMetadataBatch(fileURLs: batchCopies)
+        for url in batchCopies {
+            let keywords = readBack[url]?.fields.keywords ?? []
+            guard keywords.contains("batch-added"), Set(keywords).count == keywords.count,
+                  readBack[url]?.fields.headline != nil else {
+                fail("SELFTEST FAIL: batch append produced \(keywords) for \(url.lastPathComponent)")
+            }
+        }
+        print("SELFTEST BATCH OK (\(result.written.count) files, keyword append verified)")
     }
 
     private static func fail(_ message: String, code: Int32 = 1) -> Never {

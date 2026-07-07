@@ -32,6 +32,48 @@ nonisolated struct FieldWritePolicy: Sendable {
     }
 }
 
+/// Outcome of a batch write: which files were written and verified, and a
+/// specific message for each one that failed.
+nonisolated struct BatchWriteResult: Sendable {
+    var written: [URL] = []
+    var failures: [(url: URL, message: String)] = []
+}
+
+/// What a multi-selection has in common: `common` holds each field's value
+/// where every file agrees (nil where they differ or are all empty), and
+/// `conflicting` names the fields that differ — shown to the user before a
+/// batch overwrite so they aren't blind-writing over per-image data.
+nonisolated struct BatchFieldSummary: Equatable, Sendable {
+    var common = MetadataFields()
+    var conflicting: Set<MetadataFields.Field> = []
+    var count = 0
+
+    static func summarize(_ allFields: [MetadataFields]) -> BatchFieldSummary {
+        var summary = BatchFieldSummary(count: allFields.count)
+        guard let first = allFields.first else { return summary }
+
+        func norm(_ s: String?) -> String? {
+            guard let t = s?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
+            return t
+        }
+        for (field, keyPath) in MetadataFields.scalarFieldKeyPaths {
+            let firstValue = norm(first[keyPath: keyPath])
+            if allFields.allSatisfy({ norm($0[keyPath: keyPath]) == firstValue }) {
+                summary.common[keyPath: keyPath] = firstValue
+            } else {
+                summary.conflicting.insert(field)
+            }
+        }
+        let firstKeywords = first.keywords ?? []
+        if allFields.allSatisfy({ ($0.keywords ?? []) == firstKeywords }) {
+            summary.common.keywords = firstKeywords.isEmpty ? nil : firstKeywords
+        } else {
+            summary.conflicting.insert(.keywords)
+        }
+        return summary
+    }
+}
+
 /// The editable IPTC Core/Extension subset. All writes go out as IPTC IIM +
 /// XMP dual-write so Lightroom, Photo Mechanic, Bridge, and Capture One read
 /// them identically.
@@ -61,6 +103,18 @@ nonisolated struct MetadataFields: Equatable, Sendable, Codable {
     var category: String?
     var specialInstructions: String?
     var dateCreated: String?
+
+    /// All scalar (non-list) fields with their key paths, for generic
+    /// iteration. Keywords is handled separately as the one list field.
+    /// Immutable, so safe to share despite key paths lacking Sendable.
+    nonisolated(unsafe) static let scalarFieldKeyPaths: [(Field, WritableKeyPath<MetadataFields, String?>)] = [
+        (.headline, \.headline), (.caption, \.caption), (.byline, \.byline),
+        (.credit, \.credit), (.source, \.source),
+        (.copyrightNotice, \.copyrightNotice), (.copyrightStatus, \.copyrightStatus),
+        (.city, \.city), (.state, \.state), (.country, \.country),
+        (.location, \.location), (.category, \.category),
+        (.specialInstructions, \.specialInstructions), (.dateCreated, \.dateCreated),
+    ]
 
     /// True when no field carries a change (all nil).
     var isEmpty: Bool {
