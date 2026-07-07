@@ -211,6 +211,82 @@ struct MetadataPane: View {
     }
 }
 
+/// Templates menu shared by the single-image and batch editors: apply a
+/// saved boilerplate to the draft (never writes directly), save the current
+/// draft as a new template, or delete one.
+struct TemplateMenu: View {
+    @Environment(AppState.self) private var appState
+    @Binding var draft: MetadataFields
+    /// Batch editor's keyword-mode toggle, driven by the applied template.
+    var appendKeywords: Binding<Bool>?
+    @State private var showingSaveSheet = false
+    @State private var newTemplateName = ""
+    @State private var newTemplateAppendsKeywords = true
+
+    var body: some View {
+        Menu("Templates") {
+            let store = appState.templateStore
+            if store.templates.isEmpty {
+                Text("No templates yet")
+            }
+            ForEach(store.templates) { template in
+                Button(template.name) {
+                    draft = template.apply(to: draft)
+                    if template.fields.keywords != nil {
+                        appendKeywords?.wrappedValue = template.appendKeywords
+                    }
+                }
+            }
+            Divider()
+            Button("Save Draft as Template\u{2026}") {
+                newTemplateName = ""
+                newTemplateAppendsKeywords = true
+                showingSaveSheet = true
+            }
+            .disabled(draft.isEmpty)
+            if !store.templates.isEmpty {
+                Menu("Delete Template") {
+                    ForEach(store.templates) { template in
+                        Button(template.name, role: .destructive) {
+                            store.delete(template)
+                        }
+                    }
+                }
+            }
+        }
+        .fixedSize()
+        .sheet(isPresented: $showingSaveSheet) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Save Template")
+                    .font(.headline)
+                TextField("Template name", text: $newTemplateName)
+                    .frame(width: 280)
+                Toggle("Keywords add to each image\u{2019}s existing keywords", isOn: $newTemplateAppendsKeywords)
+                    .font(.callout)
+                Text("The template captures the fields currently filled in. Empty fields are left untouched when it\u{2019}s applied.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 280, alignment: .leading)
+                HStack {
+                    Spacer()
+                    Button("Cancel") { showingSaveSheet = false }
+                    Button("Save") {
+                        appState.templateStore.save(MetadataTemplate(
+                            name: newTemplateName.trimmingCharacters(in: .whitespaces),
+                            fields: draft,
+                            appendKeywords: newTemplateAppendsKeywords
+                        ))
+                        showingSaveSheet = false
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(newTemplateName.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .padding(20)
+        }
+    }
+}
+
 /// Batch editor for a multi-selection. Fields where every file agrees are
 /// prefilled; fields that differ show a "multiple values" hint and are only
 /// written if the user types into them. Keywords can replace or append.
@@ -282,6 +358,9 @@ struct BatchEditorView: View {
                     batchRow("Credit", \.credit)
                     batchRow("Source", \.source)
                     batchRow("Copyright Notice", \.copyrightNotice)
+                    batchRow("Usage Rights", \.usageTerms, axis: .vertical)
+                    batchRow("Creator Email", \.creatorEmail)
+                    batchRow("Creator Website", \.creatorURL)
                     batchRow("City", \.city)
                     batchRow("State / Province", \.state)
                     batchRow("Country", \.country)
@@ -301,6 +380,7 @@ struct BatchEditorView: View {
 
     private var applyBar: some View {
         HStack {
+            TemplateMenu(draft: $draft, appendKeywords: $appendKeywords)
             if appState.isSaving {
                 ProgressView()
                     .controlSize(.small)
@@ -422,6 +502,16 @@ struct MetadataEditorView: View {
                         Text("Copyrighted").tag("True")
                         Text("Public Domain").tag("False")
                     }
+                    editRow("Usage Rights") {
+                        TextField("Usage Rights", text: field(\.usageTerms), axis: .vertical)
+                            .lineLimit(1...4)
+                    }
+                    editRow("Creator Email") {
+                        TextField("Creator Email", text: field(\.creatorEmail))
+                    }
+                    editRow("Creator Website") {
+                        TextField("Creator Website", text: field(\.creatorURL))
+                    }
                     editRow("City") {
                         TextField("City", text: field(\.city))
                     }
@@ -460,6 +550,7 @@ struct MetadataEditorView: View {
 
     private var saveBar: some View {
         HStack {
+            TemplateMenu(draft: $draft)
             Label(
                 appState.writeMode(for: file.kind) == .sidecar
                     ? "Saves to .xmp sidecar"

@@ -13,6 +13,7 @@ import Observation
 @MainActor
 final class AppState {
     let exifTool = ExifToolService()
+    let templateStore = TemplateStore()
 
     static let rawEmbeddedWritesKey = "rawEmbeddedWrites"
 

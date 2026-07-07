@@ -161,7 +161,9 @@ nonisolated final class ExifToolService: Sendable {
         let allPaths = fileURLs.map(\.path) + sidecarByOwner.values.map(\.path)
         for chunk in allPaths.chunked(into: 100) {
             try Task.checkCancellation()
-            let output = try await runExifToolLenient(arguments: ["-json", "-G0", "-struct"] + chunk)
+            // No -struct: XMP structures (CreatorContactInfo) must come back
+            // flattened (CreatorWorkEmail/CreatorWorkURL) for field mapping.
+            let output = try await runExifToolLenient(arguments: ["-json", "-G0"] + chunk)
             guard
                 let data = output.data(using: .utf8),
                 let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
@@ -188,8 +190,9 @@ nonisolated final class ExifToolService: Sendable {
     }
 
     private func readSingleFile(_ fileURL: URL) async throws -> MetadataRecord {
+        // No -struct: see readMetadataBatch.
         let output = try await runExifTool(arguments: [
-            "-json", "-G0", "-struct", fileURL.path,
+            "-json", "-G0", fileURL.path,
         ])
         guard
             let data = output.data(using: .utf8),
@@ -365,6 +368,9 @@ nonisolated final class ExifToolService: Sendable {
         (.source, \.source, "Source", "photoshop:Source"),
         (.copyrightNotice, \.copyrightNotice, "CopyrightNotice", "dc:Rights"),
         (.copyrightStatus, \.copyrightStatus, nil, "xmpRights:Marked"),
+        (.usageTerms, \.usageTerms, nil, "xmpRights:UsageTerms"),
+        (.creatorEmail, \.creatorEmail, nil, "iptcCore:CreatorWorkEmail"),
+        (.creatorURL, \.creatorURL, nil, "iptcCore:CreatorWorkURL"),
         (.city, \.city, "City", "photoshop:City"),
         (.state, \.state, "Province-State", "photoshop:State"),
         (.country, \.country, "Country-PrimaryLocationName", "photoshop:Country"),
@@ -494,6 +500,9 @@ nonisolated final class ExifToolService: Sendable {
         fields.source = str("XMP:Source", "IPTC:Source")
         fields.copyrightNotice = str("XMP:Rights", "IPTC:CopyrightNotice")
         fields.copyrightStatus = str("XMP:Marked")
+        fields.usageTerms = str("XMP:UsageTerms")
+        fields.creatorEmail = str("XMP:CreatorWorkEmail")
+        fields.creatorURL = str("XMP:CreatorWorkURL")
         fields.city = str("XMP:City", "IPTC:City")
         fields.state = str("XMP:State", "IPTC:Province-State")
         fields.country = str("XMP:Country", "IPTC:Country-PrimaryLocationName")

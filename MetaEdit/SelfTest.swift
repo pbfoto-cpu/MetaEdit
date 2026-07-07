@@ -55,6 +55,9 @@ nonisolated enum SelfTest {
         testFields.byline = "Selftest Byline"
         testFields.city = "Reykjavík"
         testFields.copyrightStatus = "True"
+        testFields.usageTerms = "Editorial use only; no third-party sales"
+        testFields.creatorEmail = "selftest@example.com"
+        testFields.creatorURL = "https://example.com"
 
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("MetaEditSelfTest-\(ProcessInfo.processInfo.processIdentifier)")
@@ -100,6 +103,31 @@ nonisolated enum SelfTest {
             }
         }
         print("SELFTEST BATCH OK (\(result.written.count) files, keyword append verified)")
+
+        // 4. Template apply semantics + JSON round-trip
+        var boilerplate = MetadataFields()
+        boilerplate.byline = "Template Byline"
+        boilerplate.copyrightNotice = "© 2026 Template"
+        boilerplate.usageTerms = "No use without permission"
+        boilerplate.keywords = ["archive"]
+        let template = MetadataTemplate(name: "Selftest", fields: boilerplate, appendKeywords: true)
+
+        var existing = MetadataFields()
+        existing.caption = "Keep me"
+        existing.keywords = ["existing"]
+        let applied = template.apply(to: existing)
+        guard applied.caption == "Keep me",
+              applied.byline == "Template Byline",
+              applied.usageTerms == "No use without permission",
+              applied.keywords == ["existing", "archive"] else {
+            fail("SELFTEST FAIL: template apply produced \(applied)")
+        }
+        let encoded = try JSONEncoder().encode(template)
+        let decoded = try JSONDecoder().decode(MetadataTemplate.self, from: encoded)
+        guard decoded == template else {
+            fail("SELFTEST FAIL: template JSON round-trip mismatch")
+        }
+        print("SELFTEST TEMPLATE OK")
     }
 
     private static func fail(_ message: String, code: Int32 = 1) -> Never {

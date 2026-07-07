@@ -47,8 +47,9 @@ Select an image and the right panel shows:
 - **Camera** (read-only): camera and lens, exposure, focal length, ISO,
   capture date, pixel dimensions.
 - **IPTC** (editable): Headline, Caption, Keywords, Byline/Creator, Credit,
-  Source, Copyright Notice, Copyright Status, City, State/Province,
-  Country, Location, Category, Special Instructions, Date Created.
+  Source, Copyright Notice, Copyright Status, Usage Rights, Creator Email,
+  Creator Website, City, State/Province, Country, Location, Category,
+  Special Instructions, Date Created.
 
 Where a file carries both XMP and legacy IPTC IIM values, XMP is preferred
 (the same reading order Lightroom and Photo Mechanic use). For RAW files
@@ -88,6 +89,30 @@ Nothing is written until you press **Apply to N Images** (or **⌘S**). Every
 file is verified after writing. If some files fail — a read-only card, an
 ejected drive — you get a list of exactly which files failed and why; the
 successful ones stand.
+
+## Templates
+
+Templates are for the boilerplate that never changes — a solo creator's
+copyright notice, byline, usage rights, and contact details, identical
+across thousands of archive images.
+
+**To create one:** fill in the fields the way you always do (on any image,
+or in the batch editor), then **Templates → Save Draft as Template…**. Give
+it a name. The template captures the fields that are currently filled;
+empty fields stay untouched when it's applied. You choose whether the
+template's keywords *add to* each image's existing keywords (default) or
+*replace* them.
+
+**To apply one:** pick it from the **Templates** menu in the editor panel —
+single image or batch, same menu. Applying a template fills in the fields
+on screen; **nothing is written until you press Save / Apply**, so you can
+review and tweak first (add today's city, adjust the caption) before
+committing. With a large selection, that's the whole archive workflow:
+select all, apply template, Apply to N Images, done.
+
+Templates are stored as plain JSON files in
+`~/Library/Application Support/MetaEdit/Templates/` — copy them to another
+Mac (or a colleague) and they just work.
 
 ## Where metadata is written
 

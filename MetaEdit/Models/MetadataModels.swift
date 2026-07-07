@@ -83,7 +83,8 @@ nonisolated struct BatchFieldSummary: Equatable, Sendable {
 nonisolated struct MetadataFields: Equatable, Sendable, Codable {
     enum Field: String, CaseIterable, Sendable, Codable {
         case headline, caption, keywords, byline, credit, source
-        case copyrightNotice, copyrightStatus
+        case copyrightNotice, copyrightStatus, usageTerms
+        case creatorEmail, creatorURL
         case city, state, country, location
         case category, specialInstructions, dateCreated
     }
@@ -96,6 +97,9 @@ nonisolated struct MetadataFields: Equatable, Sendable, Codable {
     var source: String?
     var copyrightNotice: String?
     var copyrightStatus: String?
+    var usageTerms: String?
+    var creatorEmail: String?
+    var creatorURL: String?
     var city: String?
     var state: String?
     var country: String?
@@ -111,6 +115,7 @@ nonisolated struct MetadataFields: Equatable, Sendable, Codable {
         (.headline, \.headline), (.caption, \.caption), (.byline, \.byline),
         (.credit, \.credit), (.source, \.source),
         (.copyrightNotice, \.copyrightNotice), (.copyrightStatus, \.copyrightStatus),
+        (.usageTerms, \.usageTerms), (.creatorEmail, \.creatorEmail), (.creatorURL, \.creatorURL),
         (.city, \.city), (.state, \.state), (.country, \.country),
         (.location, \.location), (.category, \.category),
         (.specialInstructions, \.specialInstructions), (.dateCreated, \.dateCreated),
@@ -118,11 +123,7 @@ nonisolated struct MetadataFields: Equatable, Sendable, Codable {
 
     /// True when no field carries a change (all nil).
     var isEmpty: Bool {
-        headline == nil && caption == nil && keywords == nil && byline == nil
-            && credit == nil && source == nil && copyrightNotice == nil
-            && copyrightStatus == nil && city == nil && state == nil
-            && country == nil && location == nil && category == nil
-            && specialInstructions == nil && dateCreated == nil
+        keywords == nil && Self.scalarFieldKeyPaths.allSatisfy { self[keyPath: $0.1] == nil }
     }
 
     /// A change set containing only the fields where `draft` differs from
@@ -134,15 +135,11 @@ nonisolated struct MetadataFields: Equatable, Sendable, Codable {
             guard let t = s?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
             return t
         }
-        func diff(_ keyPath: WritableKeyPath<MetadataFields, String?>) {
+        for (_, keyPath) in scalarFieldKeyPaths {
             if norm(original[keyPath: keyPath]) != norm(draft[keyPath: keyPath]) {
                 d[keyPath: keyPath] = norm(draft[keyPath: keyPath]) ?? ""
             }
         }
-        diff(\.headline); diff(\.caption); diff(\.byline); diff(\.credit)
-        diff(\.source); diff(\.copyrightNotice); diff(\.copyrightStatus)
-        diff(\.city); diff(\.state); diff(\.country); diff(\.location)
-        diff(\.category); diff(\.specialInstructions); diff(\.dateCreated)
 
         let originalKeywords = original.keywords ?? []
         let draftKeywords = (draft.keywords ?? []).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
