@@ -1,0 +1,23 @@
+Third-party software distributed with MetaEdit
+================================================
+
+ExifTool
+--------
+MetaEdit bundles ExifTool by Phil Harvey as an external subprocess for all
+metadata reads and writes. ExifTool is not linked against MetaEdit's code;
+it is redistributed as-is inside the application bundle.
+
+- Version: pinned in Scripts/fetch-exiftool.sh (currently 13.58)
+- Source:  https://github.com/exiftool/exiftool
+- Website: https://exiftool.org
+- License: ExifTool is free software; you can redistribute it and/or modify
+  it under the same terms as Perl itself — i.e. dual-licensed under the
+  Artistic License and the GNU General Public License.
+
+The full license text ships alongside the bundled copy: the fetch script
+places ExifTool's LICENSE and README files in Tools/exiftool/, and the build
+copies them into MetaEdit.app/Contents/Resources/exiftool/ next to the
+exiftool script itself.
+
+Before each public release, re-check the LICENSE file of the pinned ExifTool
+version for changes.

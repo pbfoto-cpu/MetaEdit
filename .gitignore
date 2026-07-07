@@ -62,3 +62,10 @@ fastlane/screenshots/**/*.png
 fastlane/test_output
 
 .DS_Store
+
+# Fetched ExifTool distribution (see Scripts/fetch-exiftool.sh)
+Tools/exiftool/
+
+# Local build output (xcodebuild -derivedDataPath build/...)
+build/
+DerivedData/
