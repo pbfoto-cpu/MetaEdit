@@ -119,6 +119,19 @@ Templates are stored as plain JSON files in
 `~/Library/Application Support/MetaEdit/Templates/` — copy them to another
 Mac (or a colleague) and they just work.
 
+## Fixing file dates (archive repair)
+
+If an export or transfer once mangled your files' created/modified dates
+on disk (a common Lightroom/PhotoShelter artifact), select the affected
+files, right-click → **Set File Dates from Capture Date…**. Each file's
+filesystem dates become its EXIF capture date, so Finder and other tools
+sort the archive chronologically again.
+
+Only the filesystem dates change — image data and metadata are untouched.
+You'll be asked to confirm first, because the current file dates can't be
+restored afterward. Files with no capture date in their EXIF are skipped
+and listed.
+
 ## Where metadata is written
 
 This is the part most metadata tools get wrong, so MetaEdit is explicit
