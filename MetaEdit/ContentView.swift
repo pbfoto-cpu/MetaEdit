@@ -465,15 +465,6 @@ struct MetadataEditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             Form {
-                Section("Camera") {
-                    cameraRow("Camera", record.camera.camera)
-                    cameraRow("Lens", record.camera.lens)
-                    cameraRow("Exposure", record.camera.exposure)
-                    cameraRow("Focal Length", record.camera.focalLength)
-                    cameraRow("ISO", record.camera.iso)
-                    cameraRow("Captured", record.camera.captureDate)
-                    cameraRow("Dimensions", record.camera.dimensions)
-                }
                 Section("IPTC") {
                     editRow("Headline") {
                         TextField("Headline", text: field(\.headline))
@@ -534,6 +525,15 @@ struct MetadataEditorView: View {
                     editRow("Date Created") {
                         TextField("Date Created", text: field(\.dateCreated), prompt: Text("YYYY:MM:DD"))
                     }
+                }
+                Section("Camera") {
+                    cameraRow("Camera", record.camera.camera)
+                    cameraRow("Lens", record.camera.lens)
+                    cameraRow("Exposure", record.camera.exposure)
+                    cameraRow("Focal Length", record.camera.focalLength)
+                    cameraRow("ISO", record.camera.iso)
+                    cameraRow("Captured", record.camera.captureDate)
+                    cameraRow("Dimensions", record.camera.dimensions)
                 }
             }
             .formStyle(.grouped)
