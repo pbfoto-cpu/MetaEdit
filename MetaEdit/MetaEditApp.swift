@@ -7,19 +7,29 @@ import SwiftUI
 
 @main
 struct MetaEditApp: App {
-    @State private var appState = AppState()
-
     init() {
         SelfTest.runIfRequested()
     }
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environment(appState)
+            WindowRoot()
         }
         Settings {
             SettingsView()
+        }
+    }
+
+    /// Each window (or tab — ⌘N / the window tab bar) gets its own state:
+    /// independent folder, selection, and editor, so separate projects can
+    /// be browsed side by side. Templates and the thumbnail cache stay
+    /// shared app-wide.
+    struct WindowRoot: View {
+        @State private var appState = AppState()
+
+        var body: some View {
+            ContentView()
+                .environment(appState)
         }
     }
 

@@ -45,6 +45,10 @@ nonisolated struct MetadataTemplate: Identifiable, Codable, Equatable, Sendable 
 @Observable
 @MainActor
 final class TemplateStore {
+    /// One store for all windows — templates are app-wide, and a template
+    /// saved in one window must appear immediately in the others.
+    static let shared = TemplateStore()
+
     private(set) var templates: [MetadataTemplate] = []
     var lastError: String?
 
