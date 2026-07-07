@@ -554,6 +554,51 @@ nonisolated final class ExifToolService: Sendable {
         }
     }
 
+    /// Sets each file's filesystem created/modified dates to its EXIF
+    /// capture date (DateTimeOriginal, falling back to CreateDate) — for
+    /// archives whose file dates were mangled by an export or transfer.
+    /// Touches only filesystem attributes; image bytes and metadata are
+    /// unchanged. Returns how many were set and which were skipped (no
+    /// capture date or the set didn't verify).
+    func setFileDatesFromCaptureDate(fileURLs: [URL]) async throws -> (updated: Int, skipped: [String]) {
+        for chunk in fileURLs.chunked(into: 100) {
+            try Task.checkCancellation()
+            // Later redirections win when their source exists, so the
+            // fallback (CreateDate) comes first, preferred source last.
+            _ = try await runExifToolLenient(arguments: [
+                "-FileModifyDate<CreateDate",
+                "-FileCreateDate<CreateDate",
+                "-FileModifyDate<DateTimeOriginal",
+                "-FileCreateDate<DateTimeOriginal",
+            ] + chunk.map(\.path))
+        }
+
+        // Verify: file dates must now start with the capture timestamp
+        // (FileModifyDate carries a timezone suffix; capture dates don't).
+        var updated = 0
+        var skipped: [String] = []
+        for chunk in fileURLs.chunked(into: 100) {
+            let output = try await runExifToolLenient(arguments: [
+                "-json", "-G0", "-FileModifyDate", "-EXIF:DateTimeOriginal", "-EXIF:CreateDate",
+            ] + chunk.map(\.path))
+            guard let data = output.data(using: .utf8),
+                  let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+                throw MetaEditError.malformedMetadata("ExifTool returned unparseable JSON verifying file dates")
+            }
+            for tags in array {
+                let name = (tags["SourceFile"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent } ?? "?"
+                let capture = Self.stringValue(tags["EXIF:DateTimeOriginal"] ?? tags["EXIF:CreateDate"])
+                let fileDate = Self.stringValue(tags["File:FileModifyDate"])
+                if let capture, let fileDate, fileDate.hasPrefix(String(capture.prefix(19))) {
+                    updated += 1
+                } else {
+                    skipped.append(name)
+                }
+            }
+        }
+        return (updated, skipped)
+    }
+
     /// Which fields differ across a selection, so the UI can warn before a
     /// batch overwrite.
     func diffFields(across selection: [URL]) async throws -> BatchFieldSummary {

@@ -128,6 +128,21 @@ nonisolated enum SelfTest {
             fail("SELFTEST FAIL: template JSON round-trip mismatch")
         }
         print("SELFTEST TEMPLATE OK")
+
+        // 5. File dates from capture date: backdated copy gets its
+        // filesystem dates restored to a known DateTimeOriginal.
+        let dateCopy = tempDir.appendingPathComponent("dates.\(fileURL.pathExtension)")
+        try FileManager.default.copyItem(at: fileURL, to: dateCopy)
+        _ = try await service.runExifTool(arguments: [
+            "-overwrite_original", "-EXIF:DateTimeOriginal=2020:01:02 03:04:05", dateCopy.path,
+        ])
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date()], ofItemAtPath: dateCopy.path)
+        let dateResult = try await service.setFileDatesFromCaptureDate(fileURLs: [dateCopy])
+        guard dateResult.updated == 1, dateResult.skipped.isEmpty else {
+            fail("SELFTEST FAIL: file-date fix updated \(dateResult.updated), skipped \(dateResult.skipped)")
+        }
+        print("SELFTEST FILE DATES OK")
     }
 
     private static func fail(_ message: String, code: Int32 = 1) -> Never {

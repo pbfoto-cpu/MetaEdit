@@ -25,6 +25,8 @@ final class AppState {
     var isSaving = false
     var currentFolder: URL?
     var errorMessage: String?
+    /// One-shot result message shown as an alert (file-date fixes etc.).
+    var alertMessage: String?
 
     @ObservationIgnored private var scanTask: Task<Void, Never>?
     @ObservationIgnored private var loadTask: Task<Void, Never>?
@@ -151,6 +153,30 @@ final class AppState {
                 }
             } catch {
                 errorMessage = error.localizedDescription
+            }
+            isSaving = false
+        }
+    }
+
+    /// Sets filesystem created/modified dates to each file's EXIF capture
+    /// date, for the given list entries.
+    func setFileDatesFromCapture(_ ids: Set<ImageFileRef.ID>) {
+        let targets = files.filter { ids.contains($0.id) }.map(\.url)
+        guard !targets.isEmpty, !isSaving else { return }
+
+        isSaving = true
+        Task {
+            do {
+                let result = try await exifTool.setFileDatesFromCaptureDate(fileURLs: targets)
+                var message = "File dates set from capture date on \(result.updated) of \(targets.count) files."
+                if !result.skipped.isEmpty {
+                    let names = result.skipped.prefix(5).joined(separator: ", ")
+                    let more = result.skipped.count > 5 ? ", \u{2026}" : ""
+                    message += "\nSkipped (no capture date): \(names)\(more)"
+                }
+                alertMessage = message
+            } catch {
+                alertMessage = error.localizedDescription
             }
             isSaving = false
         }

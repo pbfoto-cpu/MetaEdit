@@ -51,8 +51,11 @@ struct ContentView: View {
 
 struct FileListPane: View {
     @Environment(AppState.self) private var appState
+    @State private var dateFixTargets: Set<ImageFileRef.ID> = []
+    @State private var showingDateFixConfirm = false
 
     var body: some View {
+        @Bindable var appState = appState
         Group {
             if appState.files.isEmpty {
                 ContentUnavailableView {
@@ -73,6 +76,12 @@ struct FileListPane: View {
                             Button("Show in Finder") {
                                 NSWorkspace.shared.activateFileViewerSelecting([file.url])
                             }
+                            Divider()
+                            Button("Set File Dates from Capture Date\u{2026}") {
+                                dateFixTargets = appState.selection.contains(file.id)
+                                    ? appState.selection : [file.id]
+                                showingDateFixConfirm = true
+                            }
                         }
                 }
                 .onDeleteCommand {
@@ -81,6 +90,24 @@ struct FileListPane: View {
             }
         }
         .navigationTitle(appState.currentFolder?.lastPathComponent ?? "MetaEdit")
+        .confirmationDialog(
+            "Set file dates from capture date?",
+            isPresented: $showingDateFixConfirm
+        ) {
+            Button("Set Dates on \(dateFixTargets.count) File\(dateFixTargets.count == 1 ? "" : "s")") {
+                appState.setFileDatesFromCapture(dateFixTargets)
+            }
+        } message: {
+            Text("Each file\u{2019}s created and modified dates on disk become its EXIF capture date. Image data and metadata are untouched, but the current file dates can\u{2019}t be restored afterward.")
+        }
+        .alert("MetaEdit", isPresented: Binding(
+            get: { appState.alertMessage != nil },
+            set: { if !$0 { appState.alertMessage = nil } }
+        )) {
+            Button("OK") { appState.alertMessage = nil }
+        } message: {
+            Text(appState.alertMessage ?? "")
+        }
     }
 
     private var selectionBinding: Binding<Set<ImageFileRef.ID>> {
