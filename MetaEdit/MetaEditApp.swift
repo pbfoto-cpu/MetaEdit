@@ -30,7 +30,23 @@ struct MetaEditApp: App {
         var body: some View {
             ContentView()
                 .environment(appState)
+                .background(PreferTabbing())
         }
+    }
+
+    /// Marks the hosting window as tab-preferring, so ⌘N opens new sessions
+    /// as tabs in the same window by default (drag a tab out to split it
+    /// into its own window).
+    struct PreferTabbing: NSViewRepresentable {
+        func makeNSView(context: Context) -> NSView {
+            let view = NSView()
+            DispatchQueue.main.async {
+                view.window?.tabbingMode = .preferred
+            }
+            return view
+        }
+
+        func updateNSView(_ nsView: NSView, context: Context) {}
     }
 
     struct SettingsView: View {
