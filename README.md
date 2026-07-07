@@ -1,2 +1,2 @@
 # MetaEdit
-Standalone EXIF/IPTC metadata editor for macOS"
+Standalone EXIF/IPTC metadata editor for macOS
