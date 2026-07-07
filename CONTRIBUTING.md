@@ -47,5 +47,12 @@ the new version's LICENSE for changes (see `THIRD_PARTY_LICENSES`).
 
 ## License
 
-By contributing you agree your contributions are licensed under the MIT
-License (see `LICENSE`).
+MetaEdit is licensed under the Functional Source License, FSL-1.1-MIT (see
+`LICENSE`): use, modify, and redistribute freely for anything except a
+competing commercial product, with each release converting to plain MIT two
+years after publication.
+
+By contributing you agree that your contributions are provided under the
+same license, and you grant the project maintainer the right to license the
+project (including your contributions) under other terms — this keeps
+future relicensing and commercial distribution possible.
