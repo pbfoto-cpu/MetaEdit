@@ -186,8 +186,9 @@ struct MetadataPane: View {
                 } description: {
                     Text(message)
                 }
-            } else if let record = appState.selectedRecord {
-                MetadataDetailView(record: record)
+            } else if let record = appState.selectedRecord, let file = appState.selectedFile {
+                MetadataEditorView(record: record, file: file)
+                    .id(file.url)
             } else {
                 ContentUnavailableView {
                     Label("No Metadata", systemImage: "list.bullet.rectangle")
@@ -200,49 +201,133 @@ struct MetadataPane: View {
     }
 }
 
-struct MetadataDetailView: View {
+struct MetadataEditorView: View {
+    @Environment(AppState.self) private var appState
     let record: MetadataRecord
+    let file: ImageFileRef
+    @State private var draft: MetadataFields
+
+    init(record: MetadataRecord, file: ImageFileRef) {
+        self.record = record
+        self.file = file
+        _draft = State(initialValue: record.fields)
+    }
+
+    private var isDirty: Bool {
+        !MetadataFields.delta(from: record.fields, to: draft).isEmpty
+    }
 
     var body: some View {
-        Form {
-            Section("Camera") {
-                row("Camera", record.camera.camera)
-                row("Lens", record.camera.lens)
-                row("Exposure", record.camera.exposure)
-                row("Focal Length", record.camera.focalLength)
-                row("ISO", record.camera.iso)
-                row("Captured", record.camera.captureDate)
-                row("Dimensions", record.camera.dimensions)
+        VStack(spacing: 0) {
+            Form {
+                Section("Camera") {
+                    cameraRow("Camera", record.camera.camera)
+                    cameraRow("Lens", record.camera.lens)
+                    cameraRow("Exposure", record.camera.exposure)
+                    cameraRow("Focal Length", record.camera.focalLength)
+                    cameraRow("ISO", record.camera.iso)
+                    cameraRow("Captured", record.camera.captureDate)
+                    cameraRow("Dimensions", record.camera.dimensions)
+                }
+                Section("IPTC") {
+                    TextField("Headline", text: field(\.headline))
+                    TextField("Caption", text: field(\.caption), axis: .vertical)
+                        .lineLimit(2...6)
+                    TextField("Keywords", text: keywordsBinding, prompt: Text("comma, separated"))
+                    TextField("Byline / Creator", text: field(\.byline))
+                    TextField("Credit", text: field(\.credit))
+                    TextField("Source", text: field(\.source))
+                    TextField("Copyright Notice", text: field(\.copyrightNotice))
+                    Picker("Copyright Status", selection: copyrightStatusBinding) {
+                        Text("Unknown").tag("")
+                        Text("Copyrighted").tag("True")
+                        Text("Public Domain").tag("False")
+                    }
+                    TextField("City", text: field(\.city))
+                    TextField("State / Province", text: field(\.state))
+                    TextField("Country", text: field(\.country))
+                    TextField("Location", text: field(\.location))
+                    TextField("Category", text: field(\.category))
+                    TextField("Special Instructions", text: field(\.specialInstructions), axis: .vertical)
+                        .lineLimit(1...4)
+                    TextField("Date Created", text: field(\.dateCreated), prompt: Text("YYYY:MM:DD"))
+                }
             }
-            Section("IPTC") {
-                row("Headline", record.fields.headline)
-                row("Caption", record.fields.caption)
-                row("Keywords", record.fields.keywords.isEmpty
-                    ? nil : record.fields.keywords.joined(separator: ", "))
-                row("Byline", record.fields.byline)
-                row("Credit", record.fields.credit)
-                row("Source", record.fields.source)
-                row("Copyright", record.fields.copyrightNotice)
-                row("City", record.fields.city)
-                row("State", record.fields.state)
-                row("Country", record.fields.country)
-                row("Location", record.fields.location)
-                row("Category", record.fields.category)
-                row("Instructions", record.fields.specialInstructions)
-                row("Date Created", record.fields.dateCreated)
-            }
+            .formStyle(.grouped)
+            .disabled(appState.isSaving)
+
+            Divider()
+            saveBar
         }
-        .formStyle(.grouped)
+        .onChange(of: record.fields) { _, refreshed in
+            // Selection changes and post-save re-reads both reset the draft.
+            draft = refreshed
+        }
+    }
+
+    private var saveBar: some View {
+        HStack {
+            Label(
+                appState.writeMode(for: file.kind) == .sidecar
+                    ? "Saves to .xmp sidecar"
+                    : "Saves into file",
+                systemImage: appState.writeMode(for: file.kind) == .sidecar
+                    ? "doc.badge.plus" : "doc.badge.gearshape"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .help("Where metadata is written for this file type. RAW files default to sidecars; change in Settings.")
+
+            Spacer()
+
+            if appState.isSaving {
+                ProgressView()
+                    .controlSize(.small)
+            }
+            Button("Revert") { draft = record.fields }
+                .disabled(!isDirty || appState.isSaving)
+            Button("Save") { appState.save(draft: draft) }
+                .keyboardShortcut("s", modifiers: .command)
+                .buttonStyle(.borderedProminent)
+                .disabled(!isDirty || appState.isSaving)
+        }
+        .padding(10)
     }
 
     @ViewBuilder
-    private func row(_ label: String, _ value: String?) -> some View {
+    private func cameraRow(_ label: String, _ value: String?) -> some View {
         LabeledContent(label) {
             Text(value ?? "\u{2014}")
                 .foregroundStyle(value == nil ? .tertiary : .primary)
                 .textSelection(.enabled)
                 .multilineTextAlignment(.trailing)
         }
+    }
+
+    private func field(_ keyPath: WritableKeyPath<MetadataFields, String?>) -> Binding<String> {
+        Binding(
+            get: { draft[keyPath: keyPath] ?? "" },
+            set: { draft[keyPath: keyPath] = $0.isEmpty ? nil : $0 }
+        )
+    }
+
+    private var keywordsBinding: Binding<String> {
+        Binding(
+            get: { (draft.keywords ?? []).joined(separator: ", ") },
+            set: { text in
+                let parsed = text.split(separator: ",")
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+                draft.keywords = parsed.isEmpty ? nil : parsed
+            }
+        )
+    }
+
+    private var copyrightStatusBinding: Binding<String> {
+        Binding(
+            get: { draft.copyrightStatus ?? "" },
+            set: { draft.copyrightStatus = $0.isEmpty ? nil : $0 }
+        )
     }
 }
 

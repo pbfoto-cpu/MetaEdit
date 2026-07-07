@@ -14,10 +14,13 @@ import Observation
 final class AppState {
     let exifTool = ExifToolService()
 
+    static let rawEmbeddedWritesKey = "rawEmbeddedWrites"
+
     var files: [ImageFileRef] = []
     var selection: ImageFileRef.ID?
     var selectedRecord: MetadataRecord?
     var isLoadingMetadata = false
+    var isSaving = false
     var currentFolder: URL?
     var errorMessage: String?
 
@@ -69,6 +72,41 @@ final class AppState {
         files.append(contentsOf: added)
         if selection == nil {
             selection = added.first?.id
+        }
+    }
+
+    /// Where a save for this file kind will land, honoring the RAW
+    /// embedded-writes setting. The UI surfaces this before every save.
+    func writeMode(for kind: FileKind) -> WriteMode {
+        guard kind == .raw else { return .embedded }
+        return UserDefaults.standard.bool(forKey: Self.rawEmbeddedWritesKey) ? .embedded : .sidecar
+    }
+
+    /// Commits the edited fields for the selected file: writes only the
+    /// changed fields, verifies the write by re-reading, then refreshes the
+    /// panel from disk.
+    func save(draft: MetadataFields) {
+        guard let file = selectedFile, let original = selectedRecord?.fields else { return }
+        let delta = MetadataFields.delta(from: original, to: draft)
+        guard !delta.isEmpty, !isSaving else { return }
+
+        isSaving = true
+        errorMessage = nil
+        Task {
+            do {
+                let mode = writeMode(for: file.kind)
+                try await exifTool.writeMetadata(fileURL: file.url, fields: delta, mode: mode)
+                guard try await exifTool.verifyWrite(fileURL: file.url, expected: delta, mode: mode) else {
+                    throw MetaEditError.writeVerificationFailed(path: file.fileName)
+                }
+                let refreshed = try await exifTool.readMetadata(fileURL: file.url)
+                if selection == file.id {
+                    selectedRecord = refreshed
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            isSaving = false
         }
     }
 

@@ -35,6 +35,9 @@ nonisolated struct FieldWritePolicy: Sendable {
 /// The editable IPTC Core/Extension subset. All writes go out as IPTC IIM +
 /// XMP dual-write so Lightroom, Photo Mechanic, Bridge, and Capture One read
 /// them identically.
+///
+/// Doubles as a *partial* change set for writes: `nil` means "leave this
+/// field unchanged"; an empty string / empty array means "clear the tag".
 nonisolated struct MetadataFields: Equatable, Sendable, Codable {
     enum Field: String, CaseIterable, Sendable, Codable {
         case headline, caption, keywords, byline, credit, source
@@ -45,7 +48,7 @@ nonisolated struct MetadataFields: Equatable, Sendable, Codable {
 
     var headline: String?
     var caption: String?
-    var keywords: [String] = []
+    var keywords: [String]?
     var byline: String?
     var credit: String?
     var source: String?
@@ -58,6 +61,42 @@ nonisolated struct MetadataFields: Equatable, Sendable, Codable {
     var category: String?
     var specialInstructions: String?
     var dateCreated: String?
+
+    /// True when no field carries a change (all nil).
+    var isEmpty: Bool {
+        headline == nil && caption == nil && keywords == nil && byline == nil
+            && credit == nil && source == nil && copyrightNotice == nil
+            && copyrightStatus == nil && city == nil && state == nil
+            && country == nil && location == nil && category == nil
+            && specialInstructions == nil && dateCreated == nil
+    }
+
+    /// A change set containing only the fields where `draft` differs from
+    /// `original`. Cleared fields come through as "" / [] so the write layer
+    /// deletes the tags.
+    static func delta(from original: MetadataFields, to draft: MetadataFields) -> MetadataFields {
+        var d = MetadataFields()
+        func norm(_ s: String?) -> String? {
+            guard let t = s?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
+            return t
+        }
+        func diff(_ keyPath: WritableKeyPath<MetadataFields, String?>) {
+            if norm(original[keyPath: keyPath]) != norm(draft[keyPath: keyPath]) {
+                d[keyPath: keyPath] = norm(draft[keyPath: keyPath]) ?? ""
+            }
+        }
+        diff(\.headline); diff(\.caption); diff(\.byline); diff(\.credit)
+        diff(\.source); diff(\.copyrightNotice); diff(\.copyrightStatus)
+        diff(\.city); diff(\.state); diff(\.country); diff(\.location)
+        diff(\.category); diff(\.specialInstructions); diff(\.dateCreated)
+
+        let originalKeywords = original.keywords ?? []
+        let draftKeywords = (draft.keywords ?? []).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        if originalKeywords != draftKeywords {
+            d.keywords = draftKeywords
+        }
+        return d
+    }
 }
 
 /// Read-only camera EXIF shown in the panel alongside the editable fields.

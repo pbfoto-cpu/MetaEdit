@@ -10,7 +10,7 @@ struct MetaEditApp: App {
     @State private var appState = AppState()
 
     init() {
-        Self.runSelfTestIfRequested()
+        SelfTest.runIfRequested()
     }
 
     var body: some Scene {
@@ -18,42 +18,26 @@ struct MetaEditApp: App {
             ContentView()
                 .environment(appState)
         }
+        Settings {
+            SettingsView()
+        }
     }
 
-    /// `MetaEdit.app/Contents/MacOS/MetaEdit --selftest <file>` exercises the
-    /// bundled-ExifTool-from-Task.detached path end to end from the command
-    /// line: prints the parsed record and exits 0, or the error and exits 1.
-    private static func runSelfTestIfRequested() {
-        let arguments = CommandLine.arguments
-        guard let flagIndex = arguments.firstIndex(of: "--selftest") else { return }
-        guard arguments.count > flagIndex + 1 else {
-            FileHandle.standardError.write(Data("usage: MetaEdit --selftest <image-file>\n".utf8))
-            exit(64)
-        }
-        let fileURL = URL(fileURLWithPath: arguments[flagIndex + 1])
-        let service = ExifToolService()
+    struct SettingsView: View {
+        @AppStorage(AppState.rawEmbeddedWritesKey) private var rawEmbeddedWrites = false
 
-        Task.detached {
-            do {
-                let version = try await service.exifToolVersion()
-                let record = try await service.readMetadata(fileURL: fileURL)
-                let thumbnail = await ThumbnailCache.shared.thumbnail(for: fileURL)
-                print("SELFTEST OK exiftool=\(version)")
-                print("camera: \(record.camera)")
-                print("fields: \(record.fields)")
-                if let thumbnail {
-                    print("thumbnail: \(thumbnail.width)x\(thumbnail.height)")
-                } else {
-                    FileHandle.standardError.write(Data("SELFTEST FAIL: no thumbnail generated\n".utf8))
-                    exit(1)
-                }
-                exit(0)
-            } catch {
-                FileHandle.standardError.write(Data("SELFTEST FAIL: \(error.localizedDescription)\n".utf8))
-                exit(1)
+        var body: some View {
+            Form {
+                Toggle("Write metadata into RAW files", isOn: $rawEmbeddedWrites)
+                Text(rawEmbeddedWrites
+                    ? "Edits are embedded directly inside CR2/CR3/NEF/ARW/DNG files. Most workflows expect sidecars instead — only use this if you know your other tools read embedded XMP."
+                    : "Edits to RAW files are written to an adjacent .xmp sidecar, matching Lightroom, Photo Mechanic, and Camera Raw. The RAW file itself is never modified. (Recommended)")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
+            .padding(20)
+            .frame(width: 440)
         }
-        // Park the main thread; the detached task terminates the process.
-        while true { RunLoop.main.run(until: .distantFuture) }
     }
+
 }
