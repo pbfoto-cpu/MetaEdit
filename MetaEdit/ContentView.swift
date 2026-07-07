@@ -230,27 +230,55 @@ struct MetadataEditorView: View {
                     cameraRow("Dimensions", record.camera.dimensions)
                 }
                 Section("IPTC") {
-                    TextField("Headline", text: field(\.headline))
-                    TextField("Caption", text: field(\.caption), axis: .vertical)
-                        .lineLimit(2...6)
-                    TextField("Keywords", text: keywordsBinding, prompt: Text("comma, separated"))
-                    TextField("Byline / Creator", text: field(\.byline))
-                    TextField("Credit", text: field(\.credit))
-                    TextField("Source", text: field(\.source))
-                    TextField("Copyright Notice", text: field(\.copyrightNotice))
+                    editRow("Headline") {
+                        TextField("Headline", text: field(\.headline))
+                    }
+                    editRow("Caption") {
+                        TextField("Caption", text: field(\.caption), axis: .vertical)
+                            .lineLimit(2...6)
+                    }
+                    editRow("Keywords") {
+                        TextField("Keywords", text: keywordsBinding, prompt: Text("comma, separated"))
+                    }
+                    editRow("Byline / Creator") {
+                        TextField("Byline / Creator", text: field(\.byline))
+                    }
+                    editRow("Credit") {
+                        TextField("Credit", text: field(\.credit))
+                    }
+                    editRow("Source") {
+                        TextField("Source", text: field(\.source))
+                    }
+                    editRow("Copyright Notice") {
+                        TextField("Copyright Notice", text: field(\.copyrightNotice))
+                    }
                     Picker("Copyright Status", selection: copyrightStatusBinding) {
                         Text("Unknown").tag("")
                         Text("Copyrighted").tag("True")
                         Text("Public Domain").tag("False")
                     }
-                    TextField("City", text: field(\.city))
-                    TextField("State / Province", text: field(\.state))
-                    TextField("Country", text: field(\.country))
-                    TextField("Location", text: field(\.location))
-                    TextField("Category", text: field(\.category))
-                    TextField("Special Instructions", text: field(\.specialInstructions), axis: .vertical)
-                        .lineLimit(1...4)
-                    TextField("Date Created", text: field(\.dateCreated), prompt: Text("YYYY:MM:DD"))
+                    editRow("City") {
+                        TextField("City", text: field(\.city))
+                    }
+                    editRow("State / Province") {
+                        TextField("State / Province", text: field(\.state))
+                    }
+                    editRow("Country") {
+                        TextField("Country", text: field(\.country))
+                    }
+                    editRow("Location") {
+                        TextField("Location", text: field(\.location))
+                    }
+                    editRow("Category") {
+                        TextField("Category", text: field(\.category))
+                    }
+                    editRow("Special Instructions") {
+                        TextField("Special Instructions", text: field(\.specialInstructions), axis: .vertical)
+                            .lineLimit(1...4)
+                    }
+                    editRow("Date Created") {
+                        TextField("Date Created", text: field(\.dateCreated), prompt: Text("YYYY:MM:DD"))
+                    }
                 }
             }
             .formStyle(.grouped)
@@ -301,6 +329,21 @@ struct MetadataEditorView: View {
                 .foregroundStyle(value == nil ? .tertiary : .primary)
                 .textSelection(.enabled)
                 .multilineTextAlignment(.trailing)
+        }
+    }
+
+    /// Label above a full-width field, so the cursor starts at the left
+    /// edge instead of the grouped form's trailing-aligned value slot.
+    @ViewBuilder
+    private func editRow(_ label: String, @ViewBuilder content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            content()
+                .labelsHidden()
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
