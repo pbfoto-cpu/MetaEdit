@@ -10,7 +10,25 @@ nonisolated enum LibraryScanner {
 
     private static let jpegExtensions: Set<String> = ["jpg", "jpeg"]
     private static let tiffExtensions: Set<String> = ["tif", "tiff"]
-    private static let rawExtensions: Set<String> = ["cr2", "cr3", "nef", "arw", "dng"]
+    private static let rawExtensions: Set<String> = [
+        "cr2", "cr3", "crw",        // Canon
+        "nef", "nrw",               // Nikon
+        "arw", "sr2", "srf",        // Sony
+        "dng",                      // Adobe/universal (Leica, Pentax, phones)
+        "raf",                      // Fujifilm
+        "orf",                      // Olympus / OM System
+        "rw2",                      // Panasonic
+        "pef",                      // Pentax
+        "rwl",                      // Leica
+        "srw",                      // Samsung
+        "iiq",                      // Phase One
+        "3fr", "fff",               // Hasselblad
+        "x3f",                      // Sigma
+        "mef",                      // Mamiya
+        "dcr",                      // Kodak
+        "erf",                      // Epson
+        "gpr",                      // GoPro
+    ]
 
     static func fileKind(for url: URL) -> FileKind {
         let ext = url.pathExtension.lowercased()
