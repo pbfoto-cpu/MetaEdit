@@ -101,6 +101,11 @@ editors), usage rights + creator contact fields, USER_GUIDE.md.
    each version's FSL→MIT 2-year conversion date.
 5. Later: Sparkle updates, Homebrew cask, recursive folder scan toggle,
    token-field keywords UI, HEIC read support (browse/caption phone shots).
+6. Later (v2, shared design with FotoArch): preview viewing aids —
+   zoom/pan + 100% toggle, session-only exposure/shadow inspection
+   sliders, histogram; rotation via EXIF Orientation tag write (the one
+   persistent non-destructive "edit"). No pixel editing, ever; XMP crs:
+   develop fields deliberately parked.
 
 ## Working conventions
 
