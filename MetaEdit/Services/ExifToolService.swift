@@ -573,28 +573,50 @@ nonisolated final class ExifToolService: Sendable {
             ] + chunk.map(\.path))
         }
 
-        // Verify: file dates must now start with the capture timestamp
-        // (FileModifyDate carries a timezone suffix; capture dates don't).
+        // Verify independently of ExifTool: read the capture date back via
+        // ExifTool, but check the resulting file dates through FileManager so
+        // a silently failed write can't confirm itself. ExifTool interprets
+        // the naive capture timestamp in the local timezone, so format the
+        // disk dates the same way for comparison. Both dates must match —
+        // a half-applied result (create date failed) counts as skipped.
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
+
         var updated = 0
         var skipped: [String] = []
         for chunk in fileURLs.chunked(into: 100) {
+            // ExifTool's JSON omits files it couldn't open (deleted between
+            // scan and click), so track which inputs actually came back and
+            // count the missing ones as skipped — updated + skipped must
+            // always equal the number of files requested.
+            var unseen = Set(chunk.map { $0.standardizedFileURL.path })
             let output = try await runExifToolLenient(arguments: [
-                "-json", "-G0", "-FileModifyDate", "-EXIF:DateTimeOriginal", "-EXIF:CreateDate",
+                "-json", "-EXIF:DateTimeOriginal", "-EXIF:CreateDate",
             ] + chunk.map(\.path))
             guard let data = output.data(using: .utf8),
                   let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
                 throw MetaEditError.malformedMetadata("ExifTool returned unparseable JSON verifying file dates")
             }
             for tags in array {
-                let name = (tags["SourceFile"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent } ?? "?"
-                let capture = Self.stringValue(tags["EXIF:DateTimeOriginal"] ?? tags["EXIF:CreateDate"])
-                let fileDate = Self.stringValue(tags["File:FileModifyDate"])
-                if let capture, let fileDate, fileDate.hasPrefix(String(capture.prefix(19))) {
-                    updated += 1
-                } else {
+                let path = tags["SourceFile"] as? String
+                if let path { unseen.remove(URL(fileURLWithPath: path).standardizedFileURL.path) }
+                let name = path.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "?"
+                let capture = Self.stringValue(tags["DateTimeOriginal"] ?? tags["CreateDate"])
+                    .map { String($0.prefix(19)) }
+                guard let capture, let path,
+                      let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+                      let modified = attributes[.modificationDate] as? Date,
+                      let created = attributes[.creationDate] as? Date,
+                      formatter.string(from: modified) == capture,
+                      formatter.string(from: created) == capture else {
                     skipped.append(name)
+                    continue
                 }
+                updated += 1
             }
+            skipped.append(contentsOf: unseen.map { URL(fileURLWithPath: $0).lastPathComponent })
         }
         return (updated, skipped)
     }

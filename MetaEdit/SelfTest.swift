@@ -137,10 +137,22 @@ nonisolated enum SelfTest {
             "-overwrite_original", "-EXIF:DateTimeOriginal=2020:01:02 03:04:05", dateCopy.path,
         ])
         try FileManager.default.setAttributes(
-            [.modificationDate: Date()], ofItemAtPath: dateCopy.path)
+            [.modificationDate: Date(), .creationDate: Date()], ofItemAtPath: dateCopy.path)
         let dateResult = try await service.setFileDatesFromCaptureDate(fileURLs: [dateCopy])
         guard dateResult.updated == 1, dateResult.skipped.isEmpty else {
             fail("SELFTEST FAIL: file-date fix updated \(dateResult.updated), skipped \(dateResult.skipped)")
+        }
+        // Independent disk check: both dates must equal the capture date.
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.timeZone = .current
+        dateFormatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
+        let diskAttributes = try FileManager.default.attributesOfItem(atPath: dateCopy.path)
+        for (label, key) in [("modified", FileAttributeKey.modificationDate), ("created", .creationDate)] {
+            let onDisk = (diskAttributes[key] as? Date).map(dateFormatter.string(from:)) ?? "missing"
+            guard onDisk == "2020:01:02 03:04:05" else {
+                fail("SELFTEST FAIL: file \(label) date is \(onDisk), expected 2020:01:02 03:04:05")
+            }
         }
         print("SELFTEST FILE DATES OK")
     }
