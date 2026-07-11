@@ -1,11 +1,16 @@
 # MetaEdit User Guide
 
+*MetaEdit by [FotoArch](https://fotoarch.app)*
+
 MetaEdit is a fast, lightweight EXIF/IPTC metadata viewer and editor for
 macOS, built for photojournalists and working photographers. It does one
 thing: read and write image metadata to industry standards, so your files
 round-trip cleanly with Lightroom, Photo Mechanic, Bridge, and Capture One.
 
 It is a local tool. No network access, no accounts, no AI, no telemetry.
+It is also the free companion to [FotoArch](https://fotoarch.app), the
+archiving and AI-captioning tool from the same maker — same metadata
+engine, same write-path guarantees.
 
 ---
 
@@ -32,9 +37,14 @@ with the standard macOS tab bar. Templates are shared across all windows.
 Two ways:
 
 - **Open Folder…** (toolbar button) — pick a folder; its images fill the
-  browser list.
+  browser list, **including everything in its subfolders** — a shoot
+  folder that holds only day or card subfolders shows the whole take,
+  grouped by folder with a section header per subfolder. (Only image
+  files are listed — sidecars like `.xmp`/`.on1` and system files don't
+  count, so the list can be shorter than Finder's item count.)
 - **Drag and drop** anywhere on the window:
-  - Dropping a **folder** replaces the list with that folder's contents.
+  - Dropping a **folder** replaces the list with that folder's contents
+    (subfolders included).
   - Dropping **individual files** *adds* them to the current list
     (duplicates are skipped).
 

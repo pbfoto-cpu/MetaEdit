@@ -53,7 +53,9 @@ final class AppState {
 
         scanTask = Task {
             var batch: [ImageFileRef] = []
-            for await ref in LibraryScanner.scanFolder(url, recursive: false) {
+            // Recursive by default — a shoot folder often holds only
+            // subfolders (days, cards), and the whole take should appear.
+            for await ref in LibraryScanner.scanFolder(url, recursive: true) {
                 batch.append(ref)
                 // Flush in chunks so thousands of files don't mean thousands
                 // of view updates.

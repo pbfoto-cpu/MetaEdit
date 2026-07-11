@@ -22,11 +22,23 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 260, ideal: 320)
         }
         .frame(minWidth: 900, minHeight: 520)
+        // Window title. Must live on the NavigationSplitView itself — set
+        // inside a column view it never reaches the window on macOS.
+        // The folder is the title so each tab is named by what it shows;
+        // the brand rides along as the subtitle.
+        .navigationTitle(appState.currentFolder?.lastPathComponent ?? "MetaEdit by FotoArch")
+        .navigationSubtitle(appState.currentFolder != nil ? "MetaEdit by FotoArch" : "")
         .toolbar {
             ToolbarItem {
-                Button("Open Folder\u{2026}", systemImage: "folder") {
+                // Same presentation as FotoArch's toolbar: title + icon, so
+                // the action reads as a labeled button, not a lone glyph.
+                Button {
                     openFolderPanel()
+                } label: {
+                    Label("Open Folder\u{2026}", systemImage: "folder")
                 }
+                .labelStyle(.titleAndIcon)
+                .help("Open a folder of photos — subfolders are included.")
             }
         }
         .dropDestination(for: URL.self) { urls, _ in
@@ -64,32 +76,29 @@ struct FileListPane: View {
                     Text("Open a folder or drop images here to begin.")
                 }
             } else {
-                List(appState.files, selection: selectionBinding) { file in
-                    FileRowView(file: file)
-                        .contextMenu {
-                            Button("Remove from List") {
-                                // Removing a row inside the selection removes
-                                // the whole selection.
-                                appState.remove(appState.selection.contains(file.id)
-                                    ? appState.selection : [file.id])
-                            }
-                            Button("Show in Finder") {
-                                NSWorkspace.shared.activateFileViewerSelecting([file.url])
-                            }
-                            Divider()
-                            Button("Set File Dates from Capture Date\u{2026}") {
-                                dateFixTargets = appState.selection.contains(file.id)
-                                    ? appState.selection : [file.id]
-                                showingDateFixConfirm = true
+                // Grouped by containing folder, like FotoArch's browser: the
+                // opened folder's own images first, then one section per
+                // subfolder. A single-folder list stays flat (no header noise).
+                List(selection: selectionBinding) {
+                    if sections.count == 1 {
+                        ForEach(sections[0].files) { file in
+                            row(for: file)
+                        }
+                    } else {
+                        ForEach(sections, id: \.title) { section in
+                            Section(section.title) {
+                                ForEach(section.files) { file in
+                                    row(for: file)
+                                }
                             }
                         }
+                    }
                 }
                 .onDeleteCommand {
                     appState.remove(appState.selection)
                 }
             }
         }
-        .navigationTitle(appState.currentFolder?.lastPathComponent ?? "MetaEdit")
         .confirmationDialog(
             "Set file dates from capture date?",
             isPresented: $showingDateFixConfirm
@@ -115,6 +124,56 @@ struct FileListPane: View {
             get: { appState.selection },
             set: { appState.select($0) }
         )
+    }
+
+    /// Files grouped by containing folder. The opened root's own images come
+    /// first under the root's name; subfolder sections follow alphabetically,
+    /// titled with their path relative to the root (so nested days/cards read
+    /// as "Coal mine/day 2", not just "day 2").
+    private var sections: [(title: String, files: [ImageFileRef])] {
+        let root = appState.currentFolder?.standardizedFileURL
+        let grouped = Dictionary(grouping: appState.files) {
+            $0.url.deletingLastPathComponent().standardizedFileURL
+        }
+        return grouped
+            .map { (title: sectionTitle(for: $0.key, root: root), files: $0.value, isRoot: $0.key == root) }
+            .sorted {
+                if $0.isRoot != $1.isRoot { return $0.isRoot }
+                return $0.title.localizedStandardCompare($1.title) == .orderedAscending
+            }
+            .map { (title: $0.title, files: $0.files) }
+    }
+
+    private func sectionTitle(for parent: URL, root: URL?) -> String {
+        guard let root else { return parent.lastPathComponent }
+        if parent == root { return root.lastPathComponent }
+        let rootPath = root.path + "/"
+        if parent.path.hasPrefix(rootPath) {
+            return String(parent.path.dropFirst(rootPath.count))
+        }
+        return parent.lastPathComponent
+    }
+
+    @ViewBuilder
+    private func row(for file: ImageFileRef) -> some View {
+        FileRowView(file: file)
+            .contextMenu {
+                Button("Remove from List") {
+                    // Removing a row inside the selection removes
+                    // the whole selection.
+                    appState.remove(appState.selection.contains(file.id)
+                        ? appState.selection : [file.id])
+                }
+                Button("Show in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([file.url])
+                }
+                Divider()
+                Button("Set File Dates from Capture Date\u{2026}") {
+                    dateFixTargets = appState.selection.contains(file.id)
+                        ? appState.selection : [file.id]
+                    showingDateFixConfirm = true
+                }
+            }
     }
 }
 

@@ -15,9 +15,33 @@ struct MetaEditApp: App {
         WindowGroup {
             WindowRoot()
         }
+        .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About MetaEdit") { Self.showAboutPanel() }
+            }
+        }
         Settings {
             SettingsView()
         }
+    }
+
+    /// The standard About panel, with the family byline. The credits line
+    /// is the one place the FotoArch connection appears inside the app.
+    private static func showAboutPanel() {
+        let credits = NSMutableAttributedString(
+            string: "by FotoArch — fast, standards-correct photo metadata.\n",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ])
+        let link = NSAttributedString(
+            string: "fotoarch.app",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+                .link: URL(string: "https://fotoarch.app")!,
+            ])
+        credits.append(link)
+        NSApp.orderFrontStandardAboutPanel(options: [.credits: credits])
     }
 
     /// Each window (or tab — ⌘N / the window tab bar) gets its own state:

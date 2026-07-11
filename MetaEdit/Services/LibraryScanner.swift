@@ -65,16 +65,18 @@ nonisolated enum LibraryScanner {
         }
     }
 
-    /// Downsampled preview via ImageIO. For RAW this pulls the embedded
-    /// preview (`kCGImageSourceCreateThumbnailFromImageAlways` on the source)
-    /// rather than doing a full RAW decode.
+    /// Downsampled preview via ImageIO, embedded-preview first: `IfAbsent`
+    /// returns the file's embedded thumbnail/preview when there is one and
+    /// only falls back to decoding the image when there isn't. (`Always`
+    /// forces a full decode — for RAW that's seconds per frame through
+    /// RawCamera and it starves the thread pool on big folders.)
     static func generateThumbnail(for fileURL: URL, maxDimension: CGFloat) async throws -> CGImage {
         try await Task.detached(priority: .userInitiated) {
             guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil) else {
                 throw MetaEditError.malformedMetadata("Could not open \(fileURL.lastPathComponent) as an image")
             }
             let options: [CFString: Any] = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailFromImageIfAbsent: true,
                 kCGImageSourceCreateThumbnailWithTransform: true,
                 kCGImageSourceThumbnailMaxPixelSize: maxDimension,
             ]
