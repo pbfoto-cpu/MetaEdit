@@ -27,10 +27,11 @@ MetaEdit is a single window with three panes:
 There is no setup, no import step, and no catalog. Your files stay where
 they are.
 
-**Multiple windows:** File → New Window (⌘N) opens an independent session —
-its own folder, selection, and editor — so you can compare two folders side
-by side or work separate projects at once. Windows can be merged into tabs
-with the standard macOS tab bar. Templates are shared across all windows.
+**Tabs:** File → New Window (⌘N) opens an independent session as a tab —
+its own folder, selection, and editor — so you can compare two folders or
+work separate projects at once. Each tab is named by its open folder; drag
+a tab out to make it a separate window. Templates are shared across all
+tabs and windows.
 
 ## Opening images
 
